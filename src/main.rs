@@ -1,10 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use heap::{DataObject, Reg, Stack};
 use instr::Instruction;
+use mem::{
+    DataObject,
+    stack::{Reg, Stack},
+};
 
-mod heap;
 mod instr;
+mod mem;
 
 #[derive(Debug)]
 struct VM {
@@ -14,7 +17,7 @@ struct VM {
 
 impl VM {
     fn new() -> Self {
-        let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::new_nil())));
+        let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
         Self {
             registers: registers.clone(),
             processes: vec![Process::new(registers.clone())],
@@ -92,12 +95,12 @@ impl Process {
         for instr in instrs {
             match instr {
                 Instruction::Move { dest, src } => {
-                    self.put(dest, DataObject::new_int(src));
+                    self.put(dest, DataObject::Small(src));
                 }
                 Instruction::Add { arg0, arg1, ret } => {
                     self.put(
                         ret,
-                        DataObject::new_int(
+                        DataObject::Small(
                             self.get(arg0).unwrap().expect_int()
                                 + self.get(arg1).unwrap().expect_int(),
                         ),
@@ -126,4 +129,39 @@ fn main() {
         },
     ]);
     println!("{:#?}", vm);
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        VM,
+        instr::Instruction,
+        mem::{DataObject, stack::Reg},
+    };
+
+    #[test]
+    fn basic() {
+        let mut vm = VM::new();
+        vm.run(vec![
+            Instruction::Move {
+                dest: Reg::X(0),
+                src: 10,
+            },
+            Instruction::Move {
+                dest: Reg::X(1),
+                src: 2,
+            },
+            Instruction::Add {
+                arg0: Reg::X(0),
+                arg1: Reg::X(1),
+                ret: Reg::X(0),
+            },
+        ]);
+        let regs = vm.registers.lock().unwrap();
+        assert_eq!(regs[0], DataObject::Small(12));
+        assert_eq!(regs[1], DataObject::Small(2));
+        for reg in &regs[2..] {
+            assert_eq!(*reg, DataObject::Nil);
+        }
+    }
 }

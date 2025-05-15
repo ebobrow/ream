@@ -1,4 +1,4 @@
-use crate::heap::Reg;
+use crate::Reg;
 
 pub enum Instruction {
     Move { dest: Reg, src: u32 },
