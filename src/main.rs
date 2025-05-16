@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+#![allow(dead_code)]
+#![feature(mapped_lock_guards)]
+
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use instr::Instruction;
 use mem::{
@@ -53,41 +56,29 @@ impl Process {
         }
     }
 
-    fn get(&self, reg: Reg) -> Option<DataObject> {
-        match reg {
-            Reg::X(i) => {
-                if i < 1024 {
-                    let registers = self.registers.lock().unwrap();
-                    Some(registers[i].clone())
-                } else {
-                    None
-                }
+    fn get<T, U: FnOnce(Option<&DataObject>) -> T>(&self, reg: Reg, f: U) -> T {
+        if let Reg::X(i) = reg {
+            if i < 1024 {
+                f(Some(&*MutexGuard::map(
+                    self.registers.lock().unwrap(),
+                    |arr| &mut arr[i],
+                )))
+            } else {
+                f(None)
             }
-            Reg::Y(_) => todo!(),
-            Reg::Htop => todo!(),
-            Reg::E => todo!(),
-            Reg::I => todo!(),
-            Reg::FP => todo!(),
-            Reg::CP => todo!(),
-            Reg::fcalls => todo!(),
+        } else {
+            f(self.stack.get(reg).ok())
         }
     }
 
     fn put(&mut self, reg: Reg, data: DataObject) {
-        match reg {
-            Reg::X(i) => {
-                if i < 1024 {
-                    let mut registers = self.registers.lock().unwrap();
-                    registers[i] = data;
-                }
+        if let Reg::X(i) = reg {
+            if i < 1024 {
+                let mut registers = self.registers.lock().unwrap();
+                registers[i] = data;
             }
-            Reg::Y(_) => todo!(),
-            Reg::Htop => todo!(),
-            Reg::E => todo!(),
-            Reg::I => todo!(),
-            Reg::FP => todo!(),
-            Reg::CP => todo!(),
-            Reg::fcalls => todo!(),
+        } else {
+            self.stack.put(reg, data);
         }
     }
 
@@ -95,73 +86,85 @@ impl Process {
         for instr in instrs {
             match instr {
                 Instruction::Move { dest, src } => {
-                    self.put(dest, DataObject::Small(src));
+                    self.put(dest, src);
                 }
                 Instruction::Add { arg0, arg1, ret } => {
                     self.put(
                         ret,
                         DataObject::Small(
-                            self.get(arg0).unwrap().expect_int()
-                                + self.get(arg1).unwrap().expect_int(),
+                            self.get(arg0, |i| i.unwrap().expect_int())
+                                + self.get(arg1, |i| i.unwrap().expect_int()),
                         ),
                     );
                 }
+                Instruction::Allocate { stack_need } => self.stack.allocate(stack_need),
             }
         }
     }
 }
 
-fn main() {
-    let mut vm = VM::new();
-    vm.run(vec![
-        Instruction::Move {
-            dest: Reg::X(0),
-            src: 10,
-        },
-        Instruction::Move {
-            dest: Reg::X(1),
-            src: 2,
-        },
-        Instruction::Add {
-            arg0: Reg::X(0),
-            arg1: Reg::X(1),
-            ret: Reg::X(0),
-        },
-    ]);
-    println!("{:#?}", vm);
-}
+fn main() {}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use crate::{
-        VM,
+        Process,
         instr::Instruction,
         mem::{DataObject, stack::Reg},
     };
 
+    fn run_test(instrs: Vec<Instruction>, regs: Vec<(Reg, DataObject)>) {
+        let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
+        let mut process = Process::new(registers);
+        process.run(instrs);
+        for (reg, value) in regs {
+            process.get(reg, |v| {
+                assert_eq!(v, Some(&value));
+            })
+        }
+    }
+
     #[test]
     fn basic() {
-        let mut vm = VM::new();
-        vm.run(vec![
-            Instruction::Move {
-                dest: Reg::X(0),
-                src: 10,
-            },
-            Instruction::Move {
-                dest: Reg::X(1),
-                src: 2,
-            },
-            Instruction::Add {
-                arg0: Reg::X(0),
-                arg1: Reg::X(1),
-                ret: Reg::X(0),
-            },
-        ]);
-        let regs = vm.registers.lock().unwrap();
-        assert_eq!(regs[0], DataObject::Small(12));
-        assert_eq!(regs[1], DataObject::Small(2));
-        for reg in &regs[2..] {
-            assert_eq!(*reg, DataObject::Nil);
-        }
+        run_test(
+            vec![
+                Instruction::Move {
+                    dest: Reg::X(0),
+                    src: DataObject::Small(10),
+                },
+                Instruction::Move {
+                    dest: Reg::X(1),
+                    src: DataObject::Small(2),
+                },
+                Instruction::Add {
+                    arg0: Reg::X(0),
+                    arg1: Reg::X(1),
+                    ret: Reg::X(0),
+                },
+            ],
+            vec![
+                (Reg::X(0), DataObject::Small(12)),
+                (Reg::X(1), DataObject::Small(2)),
+            ],
+        );
+    }
+
+    #[test]
+    fn memory() {
+        run_test(
+            vec![
+                Instruction::Allocate { stack_need: 2 },
+                Instruction::Move {
+                    dest: Reg::Y(0),
+                    src: DataObject::Small(0),
+                },
+            ],
+            vec![
+                (Reg::Y(0), DataObject::Small(0)),
+                (Reg::Y(1), DataObject::Nil),
+            ],
+        );
     }
 }

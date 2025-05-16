@@ -1,6 +1,7 @@
 pub mod heap;
 pub mod stack;
 
+// TODO: tagged pointers https://rust-hosted-langs.github.io/book/chapter-interp-tagged-ptrs.html
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataObject {
     Small(u32),
@@ -17,7 +18,7 @@ pub enum DataObject {
     Moved,
     Catch,
     Thing,
-    Binary,
+    Binary(bool),
     Blank,
     IC,
 
@@ -32,7 +33,7 @@ impl DataObject {
         if let DataObject::Small(v) = self {
             *v
         } else {
-            panic!("expected int, got {:?}", self);
+            panic!("expected int, got {self:?}");
         }
     }
 }
