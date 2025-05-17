@@ -1,13 +1,16 @@
-#![allow(dead_code)]
 #![feature(mapped_lock_guards)]
 
-use std::sync::{Arc, Mutex, MutexGuard};
-
-use instr::Instruction;
-use mem::{
-    DataObject,
-    stack::{Reg, Stack},
+use std::{
+    sync::{
+        Arc, Mutex, MutexGuard,
+        mpsc::{self, Sender},
+    },
+    thread,
 };
+
+pub use instr::Instruction;
+use mem::stack::Stack;
+pub use mem::{DataObject, stack::Reg};
 use pcb::PCB;
 use scheduler::Scheduler;
 
@@ -17,34 +20,50 @@ mod pcb;
 mod scheduler;
 
 #[derive(Debug)]
-struct VM {
+pub struct VM {
     registers: Arc<Mutex<[DataObject; 1024]>>,
-    processes: Vec<Arc<Mutex<Process>>>,
-    scheduler: Scheduler,
+    schedulers: Vec<Sender<Arc<Mutex<Process>>>>,
 }
 
 impl VM {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
-        let process = Arc::new(Mutex::new(Process::new_empty(0, registers.clone())));
+        let mut schedulers = Vec::with_capacity(thread::available_parallelism().unwrap().get());
+        for _ in 0..schedulers.capacity() {
+            let (tx, rx) = mpsc::channel::<Arc<Mutex<Process>>>();
+            schedulers.push(tx);
+            thread::spawn(move || {
+                Scheduler::new(rx).run();
+            });
+        }
+
         Self {
             registers: registers.clone(),
-            processes: vec![process.clone()],
-            scheduler: Scheduler::new(process),
+            schedulers,
         }
     }
 
     // TODO: this seems... wrong
-    fn run(&mut self, instrs: Vec<Instruction>) {
-        self.processes[0].lock().unwrap().run(instrs);
+    pub fn run_instrs(&mut self, instrs: Vec<Instruction>) {
+        // TODO: proper id
+        let process = Process::new(0, instrs, self.registers.clone());
+        self.schedulers[0]
+            .send(Arc::new(Mutex::new(process)))
+            .unwrap();
     }
 
-    fn spawn(&mut self, instrs: Vec<Instruction>) {
-        self.processes.push(Arc::new(Mutex::new(Process::new(
-            self.processes.len().try_into().unwrap(),
-            instrs,
-            self.registers.clone(),
-        ))));
+    // fn spawn(&mut self, instrs: Vec<Instruction>) {
+    //     self.processes.push(Arc::new(Mutex::new(Process::new(
+    //         self.processes.len().try_into().unwrap(),
+    //         instrs,
+    //         self.registers.clone(),
+    //     ))));
+    // }
+}
+
+impl Default for VM {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -61,16 +80,6 @@ impl Process {
     fn new(id: u32, instrs: Vec<Instruction>, registers: Arc<Mutex<[DataObject; 1024]>>) -> Self {
         Self {
             stack: Stack::new_from(instrs),
-            registers,
-            pcb: PCB::new(id),
-            // heap: Vec::new(),
-            // message_area: (),
-        }
-    }
-
-    fn new_empty(id: u32, registers: Arc<Mutex<[DataObject; 1024]>>) -> Self {
-        Self {
-            stack: Stack::new(),
             registers,
             pcb: PCB::new(id),
             // heap: Vec::new(),
@@ -125,13 +134,8 @@ impl Process {
         }
     }
 
-    fn run(&mut self, instrs: Vec<Instruction>) {
-        self.stack.load(instrs);
-        self.resume();
-    }
-
-    fn resume(&mut self) {
-        self.pcb.run();
+    fn run(&mut self) -> Option<Arc<Mutex<Process>>> {
+        self.pcb.set_running();
         while self.pcb.get_ip() < self.stack.instrs().len() {
             match self.stack.instrs()[self.pcb.get_ip()].clone() {
                 Instruction::Move { dest, src } => {
@@ -168,16 +172,19 @@ impl Process {
 
                 Instruction::Ret => {
                     if self.stack.ret() {
-                        break;
+                        return None;
                     }
                 }
                 Instruction::Call { ip } => {
-                    self.pcb.dec_fcalls();
-                    self.stack.call(ip);
+                    self.stack.allocate_call(ip);
+                    if let Some(next) = self.pcb.dec_fcalls() {
+                        return Some(next);
+                    }
                 }
             }
             self.pcb.inc_ip(1);
         }
+        None
     }
 }
 
@@ -197,7 +204,7 @@ mod tests {
     ) {
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
         let mut process = Process::new(0, instrs.to_vec(), registers);
-        process.resume();
+        process.run();
         for (reg, value) in regs {
             process.get(&reg, |v| {
                 assert_eq!(v, Some(&value));

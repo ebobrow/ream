@@ -60,10 +60,6 @@ impl Stack {
         }
     }
 
-    pub fn load(&mut self, instrs: Vec<Instruction>) {
-        self.instrs = instrs;
-    }
-
     pub fn get(&self, reg: &Reg) -> Result<&DataObject, String> {
         match reg {
             Reg::Y(i) => self
@@ -100,7 +96,7 @@ impl Stack {
         }
     }
 
-    pub fn call(&mut self, ip: usize) {
+    pub fn allocate_call(&mut self, ip: usize) {
         self.call_frames
             .push(CallFrame::new(ip, self.registers.len()));
         self.allocate(256);

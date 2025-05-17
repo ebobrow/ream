@@ -8,7 +8,7 @@ _"Easy peasy lemon squeazy" -- Bogdan/Björn_
 
 - [ ] Tagged pointers/better DataObject struct
 - [ ] Heap
-- [ ] Multiple processes
+- [x] Multiple processes
 - [ ] Multiple threads
 - [ ] Types
 - [ ] Maybe actually parse files

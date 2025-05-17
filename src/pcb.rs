@@ -40,21 +40,18 @@ impl PCB {
         self.fcalls
     }
 
-    /// Returns true if process must now yield
-    pub fn dec_fcalls(&mut self) {
+    pub fn dec_fcalls(&mut self) -> Option<Arc<Mutex<Process>>> {
         assert_eq!(self.status, State::Running);
         self.fcalls -= 1;
         if self.fcalls == 0 {
             self.status = State::Runnable;
-            if let Some(next) = &self.next {
-                let mut next = next.lock().unwrap();
-                if let State::Runnable = next.pcb.status {
-                    next.resume();
-                }
-            } else {
-                // TODO: what herE? yield control to scheduler?
-            }
+            return self.next.clone();
         }
+        None
+    }
+
+    pub fn is_runnable(&self) -> bool {
+        matches!(self.status, State::Runnable)
     }
 
     pub fn suspend(&mut self) {
@@ -88,9 +85,13 @@ impl PCB {
         self.next = Some(next);
     }
 
-    pub fn run(&mut self) {
+    pub fn set_running(&mut self) {
         assert_eq!(self.status, State::Runnable);
         self.status = State::Running;
+    }
+
+    pub fn next(&self) -> Option<&Arc<Mutex<Process>>> {
+        self.next.as_ref()
     }
 }
 
