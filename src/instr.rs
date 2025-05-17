@@ -11,4 +11,7 @@ pub enum Instruction {
     IsNe { lbl: usize, arg0: Reg, arg1: Reg },
 
     IsInteger { lbl: usize, arg: Reg },
+
+    Ret,
+    Call { ip: usize },
 }

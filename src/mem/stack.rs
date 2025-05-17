@@ -23,21 +23,28 @@ pub enum Reg {
 
 #[derive(Debug)]
 pub struct CallFrame {
-    /// pointer to function being called
-    f: (),
-
+    // pointer to function being called
+    // only need if we have like external functions i think
+    // f: (),
+    //
     /// return instruction pointer
     ip: usize,
 
     /// base pointer
-    bp: (),
+    bp: usize,
+}
+
+impl CallFrame {
+    pub fn new(ip: usize, bp: usize) -> Self {
+        Self { ip, bp }
+    }
 }
 
 impl Stack {
     pub fn new() -> Self {
         Self {
             registers: Vec::new(),
-            call_frames: Vec::new(),
+            call_frames: vec![CallFrame::new(0, 0)],
         }
     }
 
@@ -66,6 +73,31 @@ impl Stack {
     pub fn allocate(&mut self, words: usize) {
         self.registers
             .extend(iter::repeat_n(DataObject::Nil, words));
+    }
+
+    pub fn deallocate(&mut self, words: usize) {
+        let regs = self.registers.len();
+        if regs < words {
+            panic!("cannot deallocate {words} registers");
+        } else {
+            self.registers = self.registers[..regs - words].to_vec();
+        }
+    }
+
+    pub fn call(&mut self, ip: usize) {
+        self.call_frames
+            .push(CallFrame::new(ip, self.registers.len()));
+        self.allocate(256);
+    }
+
+    pub fn ret(&mut self) -> bool {
+        self.call_frames.pop();
+        if self.call_frames.is_empty() {
+            true
+        } else {
+            self.deallocate(256);
+            false
+        }
     }
 }
 

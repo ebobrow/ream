@@ -135,6 +135,13 @@ impl Process {
                 Instruction::IsInteger { lbl, arg } => {
                     self.type_test(arg, *lbl, |a| matches!(a, DataObject::Small(_)))
                 }
+
+                Instruction::Ret => {
+                    if self.stack.ret() {
+                        break;
+                    }
+                }
+                Instruction::Call { ip } => self.stack.call(*ip),
             }
             self.ip += 1;
         }
@@ -144,27 +151,13 @@ impl Process {
 fn main() {
     let mut vm = VM::new();
     vm.run(vec![
+        Instruction::Call { ip: 2 },
+        Instruction::Ret,
         Instruction::Move {
             dest: Reg::X(0),
-            src: DataObject::Small(1),
+            src: DataObject::Small(0),
         },
-        Instruction::Move {
-            dest: Reg::X(1),
-            src: DataObject::Small(2),
-        },
-        Instruction::IsLt {
-            lbl: 1,
-            arg0: Reg::X(0),
-            arg1: Reg::X(1),
-        },
-        Instruction::Move {
-            dest: Reg::X(0),
-            src: DataObject::Small(42),
-        },
-        Instruction::Move {
-            dest: Reg::X(1),
-            src: DataObject::Small(42),
-        },
+        Instruction::Ret,
     ]);
     println!("{vm:#?}")
 }
@@ -327,6 +320,34 @@ mod tests {
                 },
             ],
             vec![(Reg::X(0), DataObject::Small(0))],
+        );
+    }
+
+    #[test]
+    fn calls() {
+        run_test(
+            vec![
+                Instruction::Call { ip: 2 },
+                Instruction::Ret,
+                Instruction::Move {
+                    dest: Reg::X(0),
+                    src: DataObject::Small(0),
+                },
+                Instruction::Ret,
+            ],
+            vec![(Reg::X(0), DataObject::Small(0))],
+        );
+
+        run_test(
+            vec![
+                Instruction::Ret,
+                Instruction::Move {
+                    dest: Reg::X(0),
+                    src: DataObject::Small(0),
+                },
+                Instruction::Ret,
+            ],
+            vec![(Reg::X(0), DataObject::Nil)],
         );
     }
 }
