@@ -8,6 +8,7 @@ pub struct Stack {
     call_frames: Vec<CallFrame>,
 }
 
+#[derive(Debug)]
 pub enum Reg {
     X(usize),
     Y(usize),
@@ -26,7 +27,7 @@ pub struct CallFrame {
     f: (),
 
     /// return instruction pointer
-    ip: (),
+    ip: usize,
 
     /// base pointer
     bp: (),
@@ -40,34 +41,25 @@ impl Stack {
         }
     }
 
-    pub fn get(&self, reg: Reg) -> Result<&DataObject, &'static str> {
+    pub fn get(&self, reg: &Reg) -> Result<&DataObject, String> {
         match reg {
-            Reg::X(_) => Err("cannot get X register from stack"),
-            Reg::Y(i) => self.registers.get(i).ok_or("register out of bounds"),
-            Reg::Htop => todo!(),
-            Reg::E => todo!(),
-            Reg::I => todo!(),
-            Reg::FP => todo!(),
-            Reg::CP => todo!(),
-            Reg::fcalls => todo!(),
+            Reg::Y(i) => self
+                .registers
+                .get(*i)
+                .ok_or("register out of bounds".to_string()),
+            _ => Err(format!("cannot get {reg:?} from stack")),
         }
     }
 
-    pub fn put(&mut self, reg: Reg, data: DataObject) {
+    pub fn put(&mut self, reg: &Reg, data: DataObject) {
         match reg {
-            Reg::X(_) => {}
             Reg::Y(i) => {
-                if i >= self.registers.len() {
+                if *i >= self.registers.len() {
                     panic!("register Y{i} does not exist")
                 }
-                self.registers[i] = data;
+                self.registers[*i] = data;
             }
-            Reg::Htop => todo!(),
-            Reg::E => todo!(),
-            Reg::I => todo!(),
-            Reg::FP => todo!(),
-            Reg::CP => todo!(),
-            Reg::fcalls => todo!(),
+            _ => panic!("cannot set {reg:?} from stack"),
         }
     }
 
@@ -86,8 +78,8 @@ mod tests {
     fn registers() {
         let mut stack = Stack::new();
         stack.allocate(1);
-        assert_eq!(stack.get(Reg::Y(0)), Ok(&DataObject::Nil));
-        stack.put(Reg::Y(0), DataObject::Small(0));
-        assert_eq!(stack.get(Reg::Y(0)), Ok(&DataObject::Small(0)));
+        assert_eq!(stack.get(&Reg::Y(0)), Ok(&DataObject::Nil));
+        stack.put(&Reg::Y(0), DataObject::Small(0));
+        assert_eq!(stack.get(&Reg::Y(0)), Ok(&DataObject::Small(0)));
     }
 }

@@ -20,7 +20,7 @@ pub enum DataObject {
     Thing,
     Binary(bool),
     Blank,
-    IC,
+    IC(usize),
 
     CP0,
     CP4,
