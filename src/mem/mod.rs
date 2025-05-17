@@ -10,7 +10,7 @@ pub enum DataObject {
     Atom,
     Refer,
     Port,
-    Pid,
+    Pid(u32),
     Tuple,
     Nil,
     List,
@@ -18,7 +18,7 @@ pub enum DataObject {
     Moved,
     Catch,
     Thing,
-    Binary(bool),
+    Binary,
     Blank,
     IC(usize),
 

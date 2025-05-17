@@ -1,5 +1,7 @@
 use crate::{Reg, mem::DataObject};
 
+// TODO: wish we didn't have to clone the dataobject
+#[derive(Debug, Clone)]
 pub enum Instruction {
     Move { dest: Reg, src: DataObject },
     Add { arg0: Reg, arg1: Reg, ret: Reg },

@@ -8,31 +8,43 @@ use mem::{
     DataObject,
     stack::{Reg, Stack},
 };
+use pcb::PCB;
+use scheduler::Scheduler;
 
 mod instr;
 mod mem;
+mod pcb;
+mod scheduler;
 
 #[derive(Debug)]
 struct VM {
     registers: Arc<Mutex<[DataObject; 1024]>>,
-    processes: Vec<Process>,
+    processes: Vec<Arc<Mutex<Process>>>,
+    scheduler: Scheduler,
 }
 
 impl VM {
     fn new() -> Self {
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
+        let process = Arc::new(Mutex::new(Process::new_empty(0, registers.clone())));
         Self {
             registers: registers.clone(),
-            processes: vec![Process::new(registers.clone())],
+            processes: vec![process.clone()],
+            scheduler: Scheduler::new(process),
         }
     }
 
+    // TODO: this seems... wrong
     fn run(&mut self, instrs: Vec<Instruction>) {
-        self.processes[0].run(instrs);
+        self.processes[0].lock().unwrap().run(instrs);
     }
 
-    fn spawn(&mut self) {
-        self.processes.push(Process::new(self.registers.clone()));
+    fn spawn(&mut self, instrs: Vec<Instruction>) {
+        self.processes.push(Arc::new(Mutex::new(Process::new(
+            self.processes.len().try_into().unwrap(),
+            instrs,
+            self.registers.clone(),
+        ))));
     }
 }
 
@@ -40,21 +52,29 @@ impl VM {
 struct Process {
     stack: Stack,
     registers: Arc<Mutex<[DataObject; 1024]>>,
-    ip: usize,
     // heap: Heap,
     // message_area: (),
-    // pcb: (),
+    pcb: PCB,
 }
 
 impl Process {
-    fn new(registers: Arc<Mutex<[DataObject; 1024]>>) -> Self {
+    fn new(id: u32, instrs: Vec<Instruction>, registers: Arc<Mutex<[DataObject; 1024]>>) -> Self {
+        Self {
+            stack: Stack::new_from(instrs),
+            registers,
+            pcb: PCB::new(id),
+            // heap: Vec::new(),
+            // message_area: (),
+        }
+    }
+
+    fn new_empty(id: u32, registers: Arc<Mutex<[DataObject; 1024]>>) -> Self {
         Self {
             stack: Stack::new(),
             registers,
-            ip: 0,
+            pcb: PCB::new(id),
             // heap: Vec::new(),
             // message_area: (),
-            // pcb: (),
         }
     }
 
@@ -70,19 +90,24 @@ impl Process {
                     f(None)
                 }
             }
-            Reg::I => f(Some(&DataObject::IC(self.ip))),
+            Reg::I => f(Some(&DataObject::IC(self.pcb.get_ip()))),
+            Reg::fcalls => f(Some(&DataObject::Small(
+                self.pcb.get_fcalls().try_into().unwrap(),
+            ))),
             _ => f(self.stack.get(reg).ok()),
         }
     }
 
     fn put(&mut self, reg: &Reg, data: DataObject) {
-        if let Reg::X(i) = reg {
-            if *i < 1024 {
-                let mut registers = self.registers.lock().unwrap();
-                registers[*i] = data;
+        match reg {
+            Reg::X(i) => {
+                if *i < 1024 {
+                    let mut registers = self.registers.lock().unwrap();
+                    registers[*i] = data;
+                }
             }
-        } else {
-            self.stack.put(reg, data);
+            Reg::I | Reg::fcalls => panic!("we probably don't want to allow this"),
+            _ => self.stack.put(reg, data),
         }
     }
 
@@ -90,50 +115,55 @@ impl Process {
         let a = self.get(arg0, |i| i.unwrap().expect_int());
         let b = self.get(arg1, |i| i.unwrap().expect_int());
         if op(a, b) {
-            self.ip += offset;
+            self.pcb.inc_ip(offset);
         }
     }
 
     fn type_test(&mut self, arg: &Reg, offset: usize, test: impl Fn(&DataObject) -> bool) {
         if self.get(arg, |a| test(a.unwrap())) {
-            self.ip += offset;
+            self.pcb.inc_ip(offset);
         }
     }
 
     fn run(&mut self, instrs: Vec<Instruction>) {
-        while self.ip < instrs.len() {
-            match &instrs[self.ip] {
+        self.stack.load(instrs);
+        self.resume();
+    }
+
+    fn resume(&mut self) {
+        self.pcb.run();
+        while self.pcb.get_ip() < self.stack.instrs().len() {
+            match self.stack.instrs()[self.pcb.get_ip()].clone() {
                 Instruction::Move { dest, src } => {
-                    // TODO: wish we didn't have to clone
-                    self.put(dest, src.clone());
+                    self.put(&dest, src);
                 }
                 Instruction::Add { arg0, arg1, ret } => {
                     self.put(
-                        ret,
+                        &ret,
                         DataObject::Small(
-                            self.get(arg0, |i| i.unwrap().expect_int())
-                                + self.get(arg1, |i| i.unwrap().expect_int()),
+                            self.get(&arg0, |i| i.unwrap().expect_int())
+                                + self.get(&arg1, |i| i.unwrap().expect_int()),
                         ),
                     );
                 }
-                Instruction::Allocate { stack_need } => self.stack.allocate(*stack_need),
+                Instruction::Allocate { stack_need } => self.stack.allocate(stack_need),
 
                 // TODO: make these work for other types
                 Instruction::IsLt { lbl, arg0, arg1 } => {
-                    self.comparison(arg0, arg1, *lbl, |a, b| a < b)
+                    self.comparison(&arg0, &arg1, lbl, |a, b| a < b)
                 }
                 Instruction::IsGe { lbl, arg0, arg1 } => {
-                    self.comparison(arg0, arg1, *lbl, |a, b| a >= b)
+                    self.comparison(&arg0, &arg1, lbl, |a, b| a >= b)
                 }
                 Instruction::IsEq { lbl, arg0, arg1 } => {
-                    self.comparison(arg0, arg1, *lbl, |a, b| a == b)
+                    self.comparison(&arg0, &arg1, lbl, |a, b| a == b)
                 }
                 Instruction::IsNe { lbl, arg0, arg1 } => {
-                    self.comparison(arg0, arg1, *lbl, |a, b| a != b)
+                    self.comparison(&arg0, &arg1, lbl, |a, b| a != b)
                 }
 
                 Instruction::IsInteger { lbl, arg } => {
-                    self.type_test(arg, *lbl, |a| matches!(a, DataObject::Small(_)))
+                    self.type_test(&arg, lbl, |a| matches!(a, DataObject::Small(_)))
                 }
 
                 Instruction::Ret => {
@@ -141,25 +171,14 @@ impl Process {
                         break;
                     }
                 }
-                Instruction::Call { ip } => self.stack.call(*ip),
+                Instruction::Call { ip } => {
+                    self.pcb.dec_fcalls();
+                    self.stack.call(ip);
+                }
             }
-            self.ip += 1;
+            self.pcb.inc_ip(1);
         }
     }
-}
-
-fn main() {
-    let mut vm = VM::new();
-    vm.run(vec![
-        Instruction::Call { ip: 2 },
-        Instruction::Ret,
-        Instruction::Move {
-            dest: Reg::X(0),
-            src: DataObject::Small(0),
-        },
-        Instruction::Ret,
-    ]);
-    println!("{vm:#?}")
 }
 
 #[cfg(test)]
@@ -172,10 +191,13 @@ mod tests {
         mem::{DataObject, stack::Reg},
     };
 
-    fn run_test(instrs: Vec<Instruction>, regs: Vec<(Reg, DataObject)>) {
+    fn run_test<const I: usize, const R: usize>(
+        instrs: [Instruction; I],
+        regs: [(Reg, DataObject); R],
+    ) {
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
-        let mut process = Process::new(registers);
-        process.run(instrs);
+        let mut process = Process::new(0, instrs.to_vec(), registers);
+        process.resume();
         for (reg, value) in regs {
             process.get(&reg, |v| {
                 assert_eq!(v, Some(&value));
@@ -186,7 +208,7 @@ mod tests {
     #[test]
     fn basic() {
         run_test(
-            vec![
+            [
                 Instruction::Move {
                     dest: Reg::X(0),
                     src: DataObject::Small(10),
@@ -201,7 +223,7 @@ mod tests {
                     ret: Reg::X(0),
                 },
             ],
-            vec![
+            [
                 (Reg::X(0), DataObject::Small(12)),
                 (Reg::X(1), DataObject::Small(2)),
             ],
@@ -211,14 +233,14 @@ mod tests {
     #[test]
     fn memory() {
         run_test(
-            vec![
+            [
                 Instruction::Allocate { stack_need: 2 },
                 Instruction::Move {
                     dest: Reg::Y(0),
                     src: DataObject::Small(0),
                 },
             ],
-            vec![
+            [
                 (Reg::Y(0), DataObject::Small(0)),
                 (Reg::Y(1), DataObject::Nil),
             ],
@@ -228,7 +250,7 @@ mod tests {
     #[test]
     fn comparisons() {
         run_test(
-            vec![
+            [
                 Instruction::Move {
                     dest: Reg::X(0),
                     src: DataObject::Small(1),
@@ -251,14 +273,14 @@ mod tests {
                     src: DataObject::Small(42),
                 },
             ],
-            vec![
+            [
                 (Reg::X(0), DataObject::Small(1)),
                 (Reg::X(1), DataObject::Small(42)),
             ],
         );
 
         run_test(
-            vec![
+            [
                 Instruction::Move {
                     dest: Reg::X(0),
                     src: DataObject::Small(2),
@@ -281,7 +303,7 @@ mod tests {
                     src: DataObject::Small(42),
                 },
             ],
-            vec![
+            [
                 (Reg::X(0), DataObject::Small(42)),
                 (Reg::X(1), DataObject::Small(42)),
             ],
@@ -291,7 +313,7 @@ mod tests {
     #[test]
     fn type_test() {
         run_test(
-            vec![
+            [
                 Instruction::Move {
                     dest: Reg::X(0),
                     src: DataObject::Small(0),
@@ -305,11 +327,11 @@ mod tests {
                     src: DataObject::Nil,
                 },
             ],
-            vec![(Reg::X(0), DataObject::Small(0))],
+            [(Reg::X(0), DataObject::Small(0))],
         );
 
         run_test(
-            vec![
+            [
                 Instruction::IsInteger {
                     lbl: 1,
                     arg: Reg::X(0),
@@ -319,14 +341,14 @@ mod tests {
                     src: DataObject::Small(0),
                 },
             ],
-            vec![(Reg::X(0), DataObject::Small(0))],
+            [(Reg::X(0), DataObject::Small(0))],
         );
     }
 
     #[test]
     fn calls() {
         run_test(
-            vec![
+            [
                 Instruction::Call { ip: 2 },
                 Instruction::Ret,
                 Instruction::Move {
@@ -335,11 +357,11 @@ mod tests {
                 },
                 Instruction::Ret,
             ],
-            vec![(Reg::X(0), DataObject::Small(0))],
+            [(Reg::X(0), DataObject::Small(0))],
         );
 
         run_test(
-            vec![
+            [
                 Instruction::Ret,
                 Instruction::Move {
                     dest: Reg::X(0),
@@ -347,7 +369,7 @@ mod tests {
                 },
                 Instruction::Ret,
             ],
-            vec![(Reg::X(0), DataObject::Nil)],
+            [(Reg::X(0), DataObject::Nil)],
         );
     }
 }

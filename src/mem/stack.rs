@@ -1,14 +1,17 @@
 use std::iter;
 
+use crate::instr::Instruction;
+
 use super::DataObject;
 
 #[derive(Debug)]
 pub struct Stack {
     registers: Vec<DataObject>,
     call_frames: Vec<CallFrame>,
+    instrs: Vec<Instruction>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Reg {
     X(usize),
     Y(usize),
@@ -45,7 +48,20 @@ impl Stack {
         Self {
             registers: Vec::new(),
             call_frames: vec![CallFrame::new(0, 0)],
+            instrs: Vec::new(),
         }
+    }
+
+    pub fn new_from(instrs: Vec<Instruction>) -> Self {
+        Self {
+            registers: Vec::new(),
+            call_frames: vec![CallFrame::new(0, 0)],
+            instrs,
+        }
+    }
+
+    pub fn load(&mut self, instrs: Vec<Instruction>) {
+        self.instrs = instrs;
     }
 
     pub fn get(&self, reg: &Reg) -> Result<&DataObject, String> {
@@ -98,6 +114,10 @@ impl Stack {
             self.deallocate(256);
             false
         }
+    }
+
+    pub fn instrs(&self) -> &[Instruction] {
+        &self.instrs
     }
 }
 
