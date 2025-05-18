@@ -7,5 +7,5 @@ fn main() {
         src: DataObject::Small(0),
     }]);
 
-    // println!("{vm:#?}")
+    println!("{vm:#?}")
 }

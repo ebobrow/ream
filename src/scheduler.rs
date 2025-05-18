@@ -3,7 +3,7 @@ use std::{
     thread,
 };
 
-use crate::Process;
+use crate::vm::Process;
 
 #[derive(Debug)]
 pub struct Scheduler {
@@ -27,52 +27,37 @@ impl Scheduler {
     fn pop_ready_queue(&mut self) -> Option<Arc<Mutex<Process>>> {
         let old_first = self.ready_queue_first.clone();
         if let Some(ref old_first) = old_first {
-            self.ready_queue_first = old_first.lock().unwrap().pcb.next().cloned();
+            let next = old_first.lock().unwrap().pcb().next().cloned();
+            if next.is_none() {
+                self.ready_queue_last = None;
+            }
+            self.ready_queue_first = next;
         }
         old_first
+    }
+
+    fn push_ready_queue(&mut self, process: Arc<Mutex<Process>>) {
+        // *self.num_processes.get_mut() += 1;
+
+        if let Some(old_last) = &self.ready_queue_last {
+            old_last.lock().unwrap().pcb_mut().set_next(process.clone());
+        } else {
+            self.ready_queue_first = Some(process.clone());
+        }
+        self.ready_queue_last = Some(process);
     }
 
     pub fn run(&mut self) {
         loop {
             if let Some(first) = self.pop_ready_queue() {
                 let first = first.clone();
-                self.run_process(&mut first.lock().unwrap());
+                let mut first = first.lock().unwrap();
+                first.run();
             } else if let Ok(process) = self.rx.try_recv() {
-                self.enqueue(process);
+                self.push_ready_queue(process);
             } else {
                 thread::yield_now();
             }
         }
-    }
-
-    fn run_process(&mut self, process: &mut Process) {
-        let res = process.run();
-
-        if let Ok(process) = self.rx.try_recv() {
-            self.enqueue(process);
-        }
-
-        match res {
-            Some(next) => {
-                let mut next = next.lock().unwrap();
-                if next.pcb.is_runnable() {
-                    self.run_process(&mut next);
-                }
-            }
-            None => {
-                // self.re
-            }
-        }
-    }
-
-    pub fn enqueue(&mut self, process: Arc<Mutex<Process>>) {
-        // *self.num_processes.get_mut() += 1;
-
-        if let Some(old_last) = &self.ready_queue_last {
-            old_last.lock().unwrap().pcb.set_next(process.clone());
-        } else {
-            self.ready_queue_first = Some(process.clone());
-        }
-        self.ready_queue_last = Some(process);
     }
 }

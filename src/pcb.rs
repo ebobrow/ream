@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{Process, mem::DataObject};
+use crate::{mem::DataObject, vm::Process};
 
 #[derive(Debug)]
 #[allow(clippy::upper_case_acronyms)]
@@ -40,14 +40,15 @@ impl PCB {
         self.fcalls
     }
 
-    pub fn dec_fcalls(&mut self) -> Option<Arc<Mutex<Process>>> {
+    /// returns true if process is out of time
+    pub fn dec_fcalls(&mut self) -> bool {
         assert_eq!(self.status, State::Running);
         self.fcalls -= 1;
         if self.fcalls == 0 {
             self.status = State::Runnable;
-            return self.next.clone();
+            return true;
         }
-        None
+        false
     }
 
     pub fn is_runnable(&self) -> bool {
@@ -92,6 +93,10 @@ impl PCB {
 
     pub fn next(&self) -> Option<&Arc<Mutex<Process>>> {
         self.next.as_ref()
+    }
+
+    pub fn id(&self) -> &DataObject {
+        &self.id
     }
 }
 
