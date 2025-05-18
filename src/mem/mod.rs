@@ -1,3 +1,8 @@
+use std::{
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
+
 pub mod heap;
 pub mod stack;
 
@@ -10,7 +15,7 @@ pub enum DataObject {
     Atom,
     Refer,
     Port,
-    Pid(u32),
+    Pid(PID),
     Tuple,
     Nil,
     List,
@@ -37,3 +42,25 @@ impl DataObject {
         }
     }
 }
+
+// TODO: this is probably bad
+#[derive(Clone, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
+pub struct PID {
+    scheduler: usize,
+    num: usize,
+}
+
+impl PID {
+    pub fn new(scheduler: usize, num: usize) -> Self {
+        Self { scheduler, num }
+    }
+}
+
+impl Debug for PID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{}>{}", self.scheduler, self.num)
+    }
+}
+
+pub type Registers = Arc<Mutex<[DataObject; 1024]>>;

@@ -4,70 +4,51 @@ use std::{
         mpsc::{self, Sender},
     },
     thread,
-    time::Duration,
 };
 
 use crate::{
     DataObject, Instruction, Reg,
-    mem::stack::Stack,
+    mem::{PID, Registers, stack::Stack},
     pcb::PCB,
     scheduler::{Message, Scheduler},
 };
 
 #[derive(Debug)]
 pub struct VM {
-    registers: Arc<Mutex<[DataObject; 1024]>>,
+    registers: Registers,
     schedulers: Vec<Sender<Message>>,
-    process_id: usize,
 }
 
 impl VM {
     pub fn new() -> Self {
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
         let mut schedulers = Vec::with_capacity(thread::available_parallelism().unwrap().get());
-        for _ in 0..schedulers.capacity() {
+        for i in 0..schedulers.capacity() {
             let (tx, rx) = mpsc::channel::<Message>();
             schedulers.push(tx);
             thread::spawn(move || {
-                Scheduler::new(rx).run();
+                Scheduler::new(i, rx).run();
             });
         }
 
         Self {
             registers: registers.clone(),
             schedulers,
-            process_id: 0,
         }
     }
 
-    // TODO: this seems... wrong
-    pub fn run_process(&mut self, instrs: Vec<Instruction>) {
-        let process = Process::new(
-            self.process_id.try_into().unwrap(),
-            instrs,
-            self.registers.clone(),
-        );
-        self.schedulers[0]
-            .send(Message::Spawn(Arc::new(Mutex::new(process))))
+    pub fn spawn(&mut self, instrs: Vec<Instruction>) {
+        let tx = &self.schedulers[0];
+        tx.send(Message::Spawn((instrs, self.registers.clone(), tx.clone())))
             .unwrap();
-        self.process_id += 1;
     }
 
-    // TODO: loop until all processes finish
     pub fn wait(&self) {
-        thread::sleep(Duration::from_secs(1));
         for tx in &self.schedulers {
+            // Current behavior is for thread to stop after finishing remaining tasks
             tx.send(Message::Kill).unwrap();
         }
     }
-
-    // fn spawn(&mut self, instrs: Vec<Instruction>) {
-    //     self.processes.push(Arc::new(Mutex::new(Process::new(
-    //         self.processes.len().try_into().unwrap(),
-    //         instrs,
-    //         self.registers.clone(),
-    //     ))));
-    // }
 }
 
 impl Default for VM {
@@ -79,20 +60,29 @@ impl Default for VM {
 #[derive(Debug)]
 pub struct Process {
     stack: Stack,
-    registers: Arc<Mutex<[DataObject; 1024]>>,
+    registers: Registers,
     // heap: Heap,
     // message_area: (),
     pcb: PCB,
+    // TODO: this is weird and also doesn't account for the fact that it may be moved to a
+    // different thread
+    tx: Sender<Message>,
 }
 
 impl Process {
-    fn new(id: u32, instrs: Vec<Instruction>, registers: Arc<Mutex<[DataObject; 1024]>>) -> Self {
+    pub fn new(
+        id: PID,
+        instrs: Vec<Instruction>,
+        registers: Registers,
+        tx: Sender<Message>,
+    ) -> Self {
         Self {
             stack: Stack::new_from(instrs),
             registers,
             pcb: PCB::new(id),
             // heap: Vec::new(),
             // message_area: (),
+            tx,
         }
     }
 
@@ -100,9 +90,9 @@ impl Process {
         self.pcb.id()
     }
 
-    pub fn debug_regs(&self) {
-        println!("{:#?}", &self.registers.lock().unwrap()[0..5]);
-    }
+    // pub fn debug_regs(&self) {
+    //     println!("{:#?}", &self.registers.lock().unwrap()[0..5]);
+    // }
 
     fn get<T, U: FnOnce(Option<&DataObject>) -> T>(&self, reg: &Reg, f: U) -> T {
         match reg {
@@ -176,8 +166,6 @@ impl Process {
                     );
                 }
                 Instruction::Allocate { stack_need } => self.stack.allocate(stack_need),
-
-                // TODO: make these work for other types
                 Instruction::IsLt { lbl, arg0, arg1 } => {
                     self.comparison(&arg0, &arg1, lbl, |a, b| a < b)
                 }
@@ -190,11 +178,9 @@ impl Process {
                 Instruction::IsNe { lbl, arg0, arg1 } => {
                     self.comparison(&arg0, &arg1, lbl, |a, b| a != b)
                 }
-
                 Instruction::IsInteger { lbl, arg } => {
                     self.type_test(&arg, lbl, |a| matches!(a, DataObject::Small(_)))
                 }
-
                 Instruction::Ret => {
                     self.pcb.set_ip(self.stack.cp().unwrap());
                     if self.stack.ret() {
@@ -209,6 +195,15 @@ impl Process {
                     }
                 }
                 Instruction::Jmp { lbl } => self.pcb.set_ip(lbl),
+                Instruction::Spawn { instrs } => {
+                    self.tx
+                        .send(Message::Spawn((
+                            instrs,
+                            self.registers.clone(),
+                            self.tx.clone(),
+                        )))
+                        .unwrap();
+                }
             }
         }
         true
@@ -225,11 +220,11 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
 
     use crate::{
         instr::Instruction,
-        mem::{DataObject, stack::Reg},
+        mem::{DataObject, PID, stack::Reg},
         vm::Process,
     };
 
@@ -237,8 +232,9 @@ mod tests {
         instrs: [Instruction; I],
         regs: [(Reg, DataObject); R],
     ) {
+        let (tx, _) = mpsc::channel();
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
-        let mut process = Process::new(0, instrs.to_vec(), registers);
+        let mut process = Process::new(PID::new(0, 0), instrs.to_vec(), registers, tx);
         process.run();
         for (reg, value) in regs {
             process.get(&reg, |v| {
@@ -302,7 +298,7 @@ mod tests {
                     src: DataObject::Small(2),
                 },
                 Instruction::IsLt {
-                    lbl: 1,
+                    lbl: 4,
                     arg0: Reg::X(0),
                     arg1: Reg::X(1),
                 },
@@ -332,7 +328,7 @@ mod tests {
                     src: DataObject::Small(2),
                 },
                 Instruction::IsLt {
-                    lbl: 1,
+                    lbl: 4,
                     arg0: Reg::X(0),
                     arg1: Reg::X(1),
                 },
@@ -361,7 +357,7 @@ mod tests {
                     src: DataObject::Small(0),
                 },
                 Instruction::IsInteger {
-                    lbl: 1,
+                    lbl: 3,
                     arg: Reg::X(0),
                 },
                 Instruction::Move {
@@ -375,7 +371,7 @@ mod tests {
         run_test(
             [
                 Instruction::IsInteger {
-                    lbl: 1,
+                    lbl: 3,
                     arg: Reg::X(0),
                 },
                 Instruction::Move {
@@ -391,7 +387,7 @@ mod tests {
     fn calls() {
         run_test(
             [
-                Instruction::Call { ip: 1 },
+                Instruction::Call { ip: 2 },
                 Instruction::Ret,
                 Instruction::Move {
                     dest: Reg::X(0),

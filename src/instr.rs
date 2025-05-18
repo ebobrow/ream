@@ -18,4 +18,7 @@ pub enum Instruction {
     Jmp { lbl: usize },
     Ret,
     Call { ip: usize },
+
+    // TODO: is this how we do this
+    Spawn { instrs: Vec<Instruction> },
 }

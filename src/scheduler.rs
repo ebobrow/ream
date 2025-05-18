@@ -1,13 +1,20 @@
 use std::{
-    sync::{Arc, Mutex, mpsc::Receiver},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver},
+    },
     thread,
 };
 
-use crate::vm::Process;
+use crate::{
+    Instruction,
+    mem::{PID, Registers},
+    vm::Process,
+};
 
 pub enum Message {
     Kill,
-    Spawn(Arc<Mutex<Process>>),
+    Spawn((Vec<Instruction>, Registers, mpsc::Sender<Message>)),
 }
 
 #[derive(Debug)]
@@ -15,17 +22,19 @@ pub struct Scheduler {
     // TODO: three queues based on priority
     ready_queue_first: Option<Arc<Mutex<Process>>>,
     ready_queue_last: Option<Arc<Mutex<Process>>>,
-    // num_processes: AtomicUsize,
+    procs_recvd: usize,
     rx: Receiver<Message>,
+    id: usize,
 }
 
 impl Scheduler {
-    pub fn new(rx: Receiver<Message>) -> Self {
+    pub fn new(id: usize, rx: Receiver<Message>) -> Self {
         Self {
             ready_queue_first: None,
             ready_queue_last: None,
-            // num_processes: AtomicUsize::new(0),
+            procs_recvd: 0,
             rx,
+            id,
         }
     }
 
@@ -42,8 +51,6 @@ impl Scheduler {
     }
 
     fn push_ready_queue(&mut self, process: Arc<Mutex<Process>>) {
-        // *self.num_processes.get_mut() += 1;
-
         if let Some(old_last) = &self.ready_queue_last {
             old_last.lock().unwrap().pcb_mut().set_next(process.clone());
         } else {
@@ -53,13 +60,18 @@ impl Scheduler {
     }
 
     pub fn run(&mut self) {
+        let mut kill_recvd = false;
         loop {
             if let Ok(msg) = self.rx.try_recv() {
                 match msg {
-                    Message::Kill => break,
-                    Message::Spawn(process) => {
-                        println!("received process");
-                        self.push_ready_queue(process);
+                    Message::Kill => kill_recvd = true,
+                    Message::Spawn((instrs, regs, tx)) => {
+                        let pid = PID::new(self.id, self.procs_recvd);
+                        println!("received process id {pid:?}");
+                        self.procs_recvd += 1;
+                        self.push_ready_queue(Arc::new(Mutex::new(Process::new(
+                            pid, instrs, regs, tx,
+                        ))));
                     }
                 }
             } else if let Some(first) = self.pop_ready_queue() {
@@ -78,6 +90,8 @@ impl Scheduler {
                 } else {
                     println!("process finished!");
                 }
+            } else if kill_recvd {
+                break;
             } else {
                 thread::yield_now();
             }

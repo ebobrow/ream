@@ -1,6 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{mem::DataObject, vm::Process};
+use crate::{
+    mem::{DataObject, PID},
+    vm::Process,
+};
 
 const NUM_FCALLS: usize = 4000;
 
@@ -19,7 +22,7 @@ pub struct PCB {
 }
 
 impl PCB {
-    pub fn new(id: u32) -> Self {
+    pub fn new(id: PID) -> Self {
         Self {
             id: DataObject::Pid(id),
             ip: 0,

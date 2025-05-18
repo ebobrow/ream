@@ -4,7 +4,7 @@ use ream::{DataObject, Instruction, Reg, VM};
 
 fn main() {
     let mut vm = VM::new();
-    vm.run_process(vec![
+    let proc1 = vec![
         Instruction::Move {
             dest: Reg::X(0),
             src: DataObject::Small(0),
@@ -32,9 +32,9 @@ fn main() {
         },
         Instruction::Call { ip: 5 },
         Instruction::Ret,
-    ]);
-    thread::sleep(Duration::from_millis(5));
-    vm.run_process(vec![
+    ];
+    let proc2 = vec![
+        Instruction::Spawn { instrs: proc1 },
         Instruction::Move {
             dest: Reg::Y(0),
             src: DataObject::Small(0),
@@ -62,7 +62,11 @@ fn main() {
         },
         Instruction::Call { ip: 5 },
         Instruction::Ret,
-    ]);
+    ];
+    // vm.spawn(proc1);
+    // thread::sleep(Duration::from_millis(5));
+    vm.spawn(proc2);
+    thread::sleep(Duration::from_millis(500));
 
     vm.wait();
 }
