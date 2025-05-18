@@ -7,6 +7,7 @@ pub enum Instruction {
     Add { arg0: Reg, arg1: Reg, ret: Reg },
     Allocate { stack_need: usize },
 
+    // TODO: actual labels and not offsets
     IsLt { lbl: usize, arg0: Reg, arg1: Reg },
     IsGe { lbl: usize, arg0: Reg, arg1: Reg },
     IsEq { lbl: usize, arg0: Reg, arg1: Reg },
@@ -14,6 +15,7 @@ pub enum Instruction {
 
     IsInteger { lbl: usize, arg: Reg },
 
+    Jmp { lbl: usize },
     Ret,
     Call { ip: usize },
 }

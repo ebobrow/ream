@@ -10,5 +10,7 @@ _"Easy peasy lemon squeazy" -- Bogdan/Björn_
 - [ ] Heap
 - [x] Multiple processes
 - [x] Multiple threads
+- [ ] Work stealing
 - [ ] Types
 - [ ] Maybe actually parse files
+- [ ] BIFs (spawn)

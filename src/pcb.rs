@@ -2,8 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::{mem::DataObject, vm::Process};
 
+const NUM_FCALLS: usize = 4000;
+
 #[derive(Debug)]
-#[allow(clippy::upper_case_acronyms)]
+#[allow(clippy::upper_case_acronyms, dead_code)]
 pub struct PCB {
     id: DataObject,
     ip: usize,
@@ -21,7 +23,7 @@ impl PCB {
         Self {
             id: DataObject::Pid(id),
             ip: 0,
-            fcalls: 4000,
+            fcalls: NUM_FCALLS,
             status: State::Runnable,
             rstatus: 0,
             next: None,
@@ -30,6 +32,10 @@ impl PCB {
 
     pub fn get_ip(&self) -> usize {
         self.ip
+    }
+
+    pub fn set_ip(&mut self, ip: usize) {
+        self.ip = ip;
     }
 
     pub fn inc_ip(&mut self, offset: usize) {
@@ -46,6 +52,7 @@ impl PCB {
         self.fcalls -= 1;
         if self.fcalls == 0 {
             self.status = State::Runnable;
+            self.fcalls = NUM_FCALLS;
             return true;
         }
         false
@@ -55,6 +62,7 @@ impl PCB {
         matches!(self.status, State::Runnable)
     }
 
+    #[allow(dead_code)]
     pub fn suspend(&mut self) {
         self.rstatus += 1;
         match self.status {
@@ -66,6 +74,7 @@ impl PCB {
         }
     }
 
+    #[allow(dead_code)]
     pub fn resume(&mut self) {
         if let State::Suspended { runnable } = self.status {
             self.rstatus -= 1;
@@ -82,7 +91,6 @@ impl PCB {
     }
 
     pub fn set_next(&mut self, next: Arc<Mutex<Process>>) {
-        assert!(self.next.is_none());
         self.next = Some(next);
     }
 
@@ -101,6 +109,7 @@ impl PCB {
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)]
 enum State {
     // If a suspended waiting process receives a timeout rstatus is set to runnable so it will
     // resume as runnable

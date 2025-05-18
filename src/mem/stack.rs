@@ -25,6 +25,7 @@ pub enum Reg {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct CallFrame {
     // pointer to function being called
     // only need if we have like external functions i think
@@ -44,17 +45,9 @@ impl CallFrame {
 }
 
 impl Stack {
-    pub fn new() -> Self {
-        Self {
-            registers: Vec::new(),
-            call_frames: vec![CallFrame::new(0, 0)],
-            instrs: Vec::new(),
-        }
-    }
-
     pub fn new_from(instrs: Vec<Instruction>) -> Self {
         Self {
-            registers: Vec::new(),
+            registers: vec![DataObject::Nil; 256],
             call_frames: vec![CallFrame::new(0, 0)],
             instrs,
         }
@@ -115,6 +108,10 @@ impl Stack {
     pub fn instrs(&self) -> &[Instruction] {
         &self.instrs
     }
+
+    pub fn cp(&self) -> Option<usize> {
+        self.call_frames.last().map(|frame| frame.ip)
+    }
 }
 
 #[cfg(test)]
@@ -123,8 +120,9 @@ mod tests {
 
     use super::Stack;
 
+    #[test]
     fn registers() {
-        let mut stack = Stack::new();
+        let mut stack = Stack::new_from(Vec::new());
         stack.allocate(1);
         assert_eq!(stack.get(&Reg::Y(0)), Ok(&DataObject::Nil));
         stack.put(&Reg::Y(0), DataObject::Small(0));

@@ -4,14 +4,21 @@ use std::{
         mpsc::{self, Sender},
     },
     thread,
+    time::Duration,
 };
 
-use crate::{DataObject, Instruction, Reg, mem::stack::Stack, pcb::PCB, scheduler::Scheduler};
+use crate::{
+    DataObject, Instruction, Reg,
+    mem::stack::Stack,
+    pcb::PCB,
+    scheduler::{Message, Scheduler},
+};
 
 #[derive(Debug)]
 pub struct VM {
     registers: Arc<Mutex<[DataObject; 1024]>>,
-    schedulers: Vec<Sender<Arc<Mutex<Process>>>>,
+    schedulers: Vec<Sender<Message>>,
+    process_id: usize,
 }
 
 impl VM {
@@ -19,7 +26,7 @@ impl VM {
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
         let mut schedulers = Vec::with_capacity(thread::available_parallelism().unwrap().get());
         for _ in 0..schedulers.capacity() {
-            let (tx, rx) = mpsc::channel::<Arc<Mutex<Process>>>();
+            let (tx, rx) = mpsc::channel::<Message>();
             schedulers.push(tx);
             thread::spawn(move || {
                 Scheduler::new(rx).run();
@@ -29,16 +36,29 @@ impl VM {
         Self {
             registers: registers.clone(),
             schedulers,
+            process_id: 0,
         }
     }
 
     // TODO: this seems... wrong
-    pub fn run_instrs(&mut self, instrs: Vec<Instruction>) {
-        // TODO: proper id
-        let process = Process::new(0, instrs, self.registers.clone());
+    pub fn run_process(&mut self, instrs: Vec<Instruction>) {
+        let process = Process::new(
+            self.process_id.try_into().unwrap(),
+            instrs,
+            self.registers.clone(),
+        );
         self.schedulers[0]
-            .send(Arc::new(Mutex::new(process)))
+            .send(Message::Spawn(Arc::new(Mutex::new(process))))
             .unwrap();
+        self.process_id += 1;
+    }
+
+    // TODO: loop until all processes finish
+    pub fn wait(&self) {
+        thread::sleep(Duration::from_secs(1));
+        for tx in &self.schedulers {
+            tx.send(Message::Kill).unwrap();
+        }
     }
 
     // fn spawn(&mut self, instrs: Vec<Instruction>) {
@@ -78,6 +98,10 @@ impl Process {
 
     pub fn id(&self) -> &DataObject {
         self.pcb.id()
+    }
+
+    pub fn debug_regs(&self) {
+        println!("{:#?}", &self.registers.lock().unwrap()[0..5]);
     }
 
     fn get<T, U: FnOnce(Option<&DataObject>) -> T>(&self, reg: &Reg, f: U) -> T {
@@ -121,20 +145,24 @@ impl Process {
         let a = self.get(arg0, |i| i.unwrap().expect_int());
         let b = self.get(arg1, |i| i.unwrap().expect_int());
         if op(a, b) {
-            self.pcb.inc_ip(offset);
+            self.pcb.set_ip(offset);
         }
     }
 
     fn type_test(&mut self, arg: &Reg, offset: usize, test: impl Fn(&DataObject) -> bool) {
         if self.get(arg, |a| test(a.unwrap())) {
-            self.pcb.inc_ip(offset);
+            self.pcb.set_ip(offset);
         }
     }
 
-    pub fn run(&mut self) {
+    /// returns true if process has finished
+    pub fn run(&mut self) -> bool {
         self.pcb.set_running();
         while self.pcb.get_ip() < self.stack.instrs().len() {
-            match self.stack.instrs()[self.pcb.get_ip()].clone() {
+            let instr = self.stack.instrs()[self.pcb.get_ip()].clone();
+            self.pcb.inc_ip(1);
+            // println!("{instr:?}");
+            match instr {
                 Instruction::Move { dest, src } => {
                     self.put(&dest, src);
                 }
@@ -168,19 +196,22 @@ impl Process {
                 }
 
                 Instruction::Ret => {
+                    self.pcb.set_ip(self.stack.cp().unwrap());
                     if self.stack.ret() {
-                        break;
+                        return true;
                     }
                 }
                 Instruction::Call { ip } => {
                     self.stack.allocate_call(ip);
+                    self.pcb.set_ip(self.pcb.get_ip());
                     if self.pcb.dec_fcalls() {
-                        break;
+                        return false;
                     }
                 }
+                Instruction::Jmp { lbl } => self.pcb.set_ip(lbl),
             }
-            self.pcb.inc_ip(1);
         }
+        true
     }
 
     pub fn pcb(&self) -> &PCB {
@@ -360,7 +391,7 @@ mod tests {
     fn calls() {
         run_test(
             [
-                Instruction::Call { ip: 2 },
+                Instruction::Call { ip: 1 },
                 Instruction::Ret,
                 Instruction::Move {
                     dest: Reg::X(0),
