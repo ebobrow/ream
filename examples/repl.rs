@@ -8,11 +8,13 @@ fn main() {
         "{move, {y, 0}, 0}.
 {move, {y, 1}, 8001}.
 {move, {y, 2}, 1}.
-{call, 5}.
+{call, 1}.
 {ret}.
+{label, 1}.
 {add, {y, 0}, {y, 2}, {y, 0}}.
-{is_eq, 8, {y, 0}, {y, 1}}.
-{call, 5}.
+{is_eq, 2, {y, 0}, {y, 1}}.
+{call, 1}.
+{label, 2}.
 {ret}.",
     );
     let proc2 = parse_str(
@@ -21,11 +23,13 @@ fn main() {
 {send}.
 {move, {x, 0}, 0}.
 {move, {x, 2}, 1}.
-{call, 7}.
+{call, 1}.
 {ret}.
+{label, 1}.
 {add, {x, 0}, {x, 2}, {x, 0}}.
-{is_eq, 10, {x, 0}, {x, 1}}.
-{call, 7}.
+{is_eq, 2, {x, 0}, {x, 1}}.
+{call, 1}.
+{label, 2}.
 {ret}.",
     );
     vm.lock().unwrap().spawn(proc1);

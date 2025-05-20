@@ -50,9 +50,9 @@ pub enum Item {
 }
 
 impl Item {
-    pub fn expect_num(&self) -> u32 {
+    pub fn expect_num(&self) -> usize {
         if let Item::Num(x) = self {
-            *x
+            (*x).try_into().unwrap()
         } else {
             panic!("expected num, got {self:?}");
         }

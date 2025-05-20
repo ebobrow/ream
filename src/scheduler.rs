@@ -3,7 +3,7 @@ use std::{
     thread,
 };
 
-use crate::{mem::PID, vm::Process};
+use crate::vm::Process;
 
 pub enum SchedCmd {
     Kill,
