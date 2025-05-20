@@ -53,12 +53,14 @@ impl Stack {
         }
     }
 
-    pub fn get(&self, reg: &Reg) -> Result<&DataObject, String> {
+    pub fn get(&self, reg: &Reg) -> Result<DataObject, String> {
         match reg {
             Reg::Y(i) => self
                 .registers
                 .get(*i)
-                .ok_or("register out of bounds".to_string()),
+                .ok_or("register out of bounds".to_string())
+                .cloned(),
+            Reg::CP => Ok(DataObject::IC(self.cur_frame().ip)),
             _ => Err(format!("cannot get {reg:?} from stack")),
         }
     }
@@ -71,8 +73,25 @@ impl Stack {
                 }
                 self.registers[*i] = data;
             }
+            Reg::CP => {
+                if let DataObject::IC(ip) = data {
+                    self.cur_frame_mut().ip = ip;
+                }
+            }
             _ => panic!("cannot set {reg:?} from stack"),
         }
+    }
+
+    fn cur_frame(&self) -> &CallFrame {
+        self.call_frames
+            .last()
+            .unwrap_or_else(|| panic!("stack cannot have empty call frame list"))
+    }
+
+    fn cur_frame_mut(&mut self) -> &mut CallFrame {
+        self.call_frames
+            .last_mut()
+            .unwrap_or_else(|| panic!("stack cannot have empty call frame list"))
     }
 
     pub fn allocate(&mut self, words: usize) {
@@ -124,8 +143,8 @@ mod tests {
     fn registers() {
         let mut stack = Stack::new_from(Vec::new());
         stack.allocate(1);
-        assert_eq!(stack.get(&Reg::Y(0)), Ok(&DataObject::Nil));
+        assert_eq!(stack.get(&Reg::Y(0)), Ok(DataObject::Nil));
         stack.put(&Reg::Y(0), DataObject::Small(0));
-        assert_eq!(stack.get(&Reg::Y(0)), Ok(&DataObject::Small(0)));
+        assert_eq!(stack.get(&Reg::Y(0)), Ok(DataObject::Small(0)));
     }
 }

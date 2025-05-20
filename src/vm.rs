@@ -94,25 +94,24 @@ impl Process {
     //     println!("{:#?}", &self.registers.lock().unwrap()[0..5]);
     // }
 
-    fn get<T, U: FnOnce(Option<&DataObject>) -> T>(&self, reg: &Reg, f: U) -> T {
+    fn get<T, U: FnOnce(Option<DataObject>) -> T>(&self, reg: &Reg, f: U) -> T {
         match reg {
             Reg::X(i) => {
                 if *i < 1024 {
-                    f(Some(&*MutexGuard::map(
-                        self.registers.lock().unwrap(),
-                        |arr| &mut arr[*i],
-                    )))
+                    f(Some(
+                        MutexGuard::map(self.registers.lock().unwrap(), |arr| &mut arr[*i]).clone(),
+                    ))
                 } else {
                     f(None)
                 }
             }
-            Reg::I => f(Some(&DataObject::IC(self.pcb.get_ip()))),
-            Reg::fcalls => f(Some(&DataObject::Small(
+            Reg::I => f(Some(DataObject::IC(self.pcb.get_ip()))),
+            Reg::fcalls => f(Some(DataObject::Small(
                 self.pcb.get_fcalls().try_into().unwrap(),
             ))),
-            Reg::Y(_) => f(self.stack.get(reg).ok()),
+            Reg::Y(_) | Reg::CP => f(self.stack.get(reg).ok()),
 
-            Reg::Htop | Reg::E | Reg::FP | Reg::CP => todo!(),
+            Reg::Htop | Reg::E | Reg::FP => todo!(),
         }
     }
 
@@ -125,9 +124,9 @@ impl Process {
                 }
             }
             Reg::I | Reg::fcalls => panic!("we probably don't want to allow this"),
-            Reg::Y(_) => self.stack.put(reg, data),
+            Reg::Y(_) | Reg::CP => self.stack.put(reg, data),
 
-            Reg::Htop | Reg::E | Reg::FP | Reg::CP => todo!(),
+            Reg::Htop | Reg::E | Reg::FP => todo!(),
         }
     }
 
@@ -139,7 +138,7 @@ impl Process {
         }
     }
 
-    fn type_test(&mut self, arg: &Reg, offset: usize, test: impl Fn(&DataObject) -> bool) {
+    fn type_test(&mut self, arg: &Reg, offset: usize, test: impl Fn(DataObject) -> bool) {
         if self.get(arg, |a| test(a.unwrap())) {
             self.pcb.set_ip(offset);
         }
@@ -238,7 +237,7 @@ mod tests {
         process.run();
         for (reg, value) in regs {
             process.get(&reg, |v| {
-                assert_eq!(v, Some(&value));
+                assert_eq!(v, Some(value));
             })
         }
     }
