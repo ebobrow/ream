@@ -233,10 +233,13 @@ impl Process {
                 Instruction::Spawn { instrs } => {
                     self.tx.send(VMCmd::Spawn(instrs)).unwrap();
                 }
-                Instruction::Send { pid, data } => self
-                    .tx
-                    .send(VMCmd::SendToProc(pid.expect_pid().clone(), data))
-                    .unwrap(),
+                Instruction::Send => {
+                    let pid = self.get(&Reg::X(0), |pid| pid.unwrap().expect_pid().clone());
+                    self.get(&Reg::X(1), |data| {
+                        self.tx.send(VMCmd::SendToProc(pid, data.unwrap())).unwrap();
+                    });
+                }
+                Instruction::Wait => todo!(),
             }
         }
         true

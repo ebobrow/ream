@@ -35,10 +35,15 @@ fn main() {
     ];
     let proc2 = vec![
         Instruction::Spawn { instrs: proc1 },
-        Instruction::Send {
-            pid: DataObject::Pid(PID::new(0, 1)),
-            data: DataObject::Nil,
+        Instruction::Move {
+            dest: Reg::X(0),
+            src: DataObject::Pid(PID::new(0, 1)),
         },
+        Instruction::Move {
+            dest: Reg::X(1),
+            src: DataObject::Nil,
+        },
+        Instruction::Send,
         Instruction::Move {
             dest: Reg::Y(0),
             src: DataObject::Small(0),
@@ -51,7 +56,7 @@ fn main() {
             dest: Reg::Y(2),
             src: DataObject::Small(1),
         },
-        Instruction::Call { ip: 6 },
+        Instruction::Call { ip: 9 },
         Instruction::Ret,
         // Function that increments Y0
         Instruction::Add {
@@ -60,11 +65,11 @@ fn main() {
             ret: Reg::Y(0),
         },
         Instruction::IsEq {
-            lbl: 9,
+            lbl: 12,
             arg0: Reg::Y(0),
             arg1: Reg::Y(1),
         },
-        Instruction::Call { ip: 6 },
+        Instruction::Call { ip: 9 },
         Instruction::Ret,
     ];
     // vm.spawn(proc1);
