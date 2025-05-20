@@ -1,20 +1,13 @@
 use std::{
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, Receiver},
-    },
+    sync::{Arc, Mutex, mpsc::Receiver},
     thread,
 };
 
-use crate::{
-    Instruction,
-    mem::{PID, Registers},
-    vm::Process,
-};
+use crate::{mem::PID, vm::Process};
 
-pub enum Message {
+pub enum SchedCmd {
     Kill,
-    Spawn((Vec<Instruction>, Registers, mpsc::Sender<Message>)),
+    Spawn(Arc<Mutex<Process>>),
 }
 
 #[derive(Debug)]
@@ -23,12 +16,12 @@ pub struct Scheduler {
     ready_queue_first: Option<Arc<Mutex<Process>>>,
     ready_queue_last: Option<Arc<Mutex<Process>>>,
     procs_recvd: usize,
-    rx: Receiver<Message>,
+    rx: Receiver<SchedCmd>,
     id: usize,
 }
 
 impl Scheduler {
-    pub fn new(id: usize, rx: Receiver<Message>) -> Self {
+    pub fn new(id: usize, rx: Receiver<SchedCmd>) -> Self {
         Self {
             ready_queue_first: None,
             ready_queue_last: None,
@@ -64,14 +57,11 @@ impl Scheduler {
         loop {
             if let Ok(msg) = self.rx.try_recv() {
                 match msg {
-                    Message::Kill => kill_recvd = true,
-                    Message::Spawn((instrs, regs, tx)) => {
-                        let pid = PID::new(self.id, self.procs_recvd);
-                        println!("received process id {pid:?}");
+                    SchedCmd::Kill => kill_recvd = true,
+                    SchedCmd::Spawn(proc) => {
+                        println!("received process");
                         self.procs_recvd += 1;
-                        self.push_ready_queue(Arc::new(Mutex::new(Process::new(
-                            pid, instrs, regs, tx,
-                        ))));
+                        self.push_ready_queue(proc);
                     }
                 }
             } else if let Some(first) = self.pop_ready_queue() {

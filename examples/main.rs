@@ -1,9 +1,9 @@
 use std::{thread, time::Duration};
 
-use ream::{DataObject, Instruction, Reg, VM};
+use ream::{DataObject, Instruction, PID, Reg, VM};
 
 fn main() {
-    let mut vm = VM::new();
+    let vm = VM::new();
     let proc1 = vec![
         Instruction::Move {
             dest: Reg::X(0),
@@ -35,6 +35,10 @@ fn main() {
     ];
     let proc2 = vec![
         Instruction::Spawn { instrs: proc1 },
+        Instruction::Send {
+            pid: DataObject::Pid(PID::new(0, 1)),
+            data: DataObject::Nil,
+        },
         Instruction::Move {
             dest: Reg::Y(0),
             src: DataObject::Small(0),
@@ -47,7 +51,7 @@ fn main() {
             dest: Reg::Y(2),
             src: DataObject::Small(1),
         },
-        Instruction::Call { ip: 5 },
+        Instruction::Call { ip: 6 },
         Instruction::Ret,
         // Function that increments Y0
         Instruction::Add {
@@ -56,17 +60,17 @@ fn main() {
             ret: Reg::Y(0),
         },
         Instruction::IsEq {
-            lbl: 8,
+            lbl: 9,
             arg0: Reg::Y(0),
             arg1: Reg::Y(1),
         },
-        Instruction::Call { ip: 5 },
+        Instruction::Call { ip: 6 },
         Instruction::Ret,
     ];
     // vm.spawn(proc1);
     // thread::sleep(Duration::from_millis(5));
-    vm.spawn(proc2);
+    vm.lock().unwrap().spawn(proc2);
     thread::sleep(Duration::from_millis(500));
 
-    vm.wait();
+    vm.lock().unwrap().wait();
 }

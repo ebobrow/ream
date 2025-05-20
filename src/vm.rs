@@ -9,51 +9,91 @@ use std::{
 use crate::{
     DataObject, Instruction, Reg,
     mem::{PID, Registers, stack::Stack},
+    message::Mailbox,
     pcb::PCB,
-    scheduler::{Message, Scheduler},
+    scheduler::{SchedCmd, Scheduler},
 };
+
+pub enum VMCmd {
+    Kill,
+    Spawn(Vec<Instruction>),
+    SendToProc(PID, DataObject),
+}
 
 #[derive(Debug)]
 pub struct VM {
     registers: Registers,
-    schedulers: Vec<Sender<Message>>,
+    schedulers: Vec<Sender<SchedCmd>>,
+    procs: Vec<Arc<Mutex<Process>>>,
+
+    /// Send handle for spawned processes
+    tx: mpsc::Sender<VMCmd>,
 }
 
 impl VM {
-    pub fn new() -> Self {
+    pub fn new() -> Arc<Mutex<Self>> {
         let registers = Arc::new(Mutex::new(core::array::from_fn(|_| DataObject::Nil)));
-        let mut schedulers = Vec::with_capacity(thread::available_parallelism().unwrap().get());
+        let mut schedulers = Vec::with_capacity(thread::available_parallelism().unwrap().get() - 1);
         for i in 0..schedulers.capacity() {
-            let (tx, rx) = mpsc::channel::<Message>();
+            let (tx, rx) = mpsc::channel();
             schedulers.push(tx);
             thread::spawn(move || {
                 Scheduler::new(i, rx).run();
             });
         }
 
-        Self {
+        let (tx, rx) = mpsc::channel();
+        let vm = Arc::new(Mutex::new(Self {
             registers: registers.clone(),
             schedulers,
+            procs: Vec::new(),
+            tx,
+        }));
+        let vm2 = vm.clone();
+        thread::spawn(move || {
+            Self::listen_cmd(vm2, rx);
+        });
+        vm
+    }
+
+    fn listen_cmd(vm: Arc<Mutex<Self>>, rx: mpsc::Receiver<VMCmd>) {
+        while let Ok(cmd) = rx.recv() {
+            match cmd {
+                VMCmd::Spawn(instrs) => {
+                    let mut vm = vm.lock().unwrap();
+                    vm.spawn(instrs)
+                }
+                VMCmd::SendToProc(pid, data_object) => {
+                    let vm = vm.lock().unwrap();
+                    vm.procs
+                        .iter()
+                        .find(|p| p.lock().unwrap().id().expect_pid() == &pid)
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .write_to_mailbox(data_object);
+                }
+                VMCmd::Kill => break,
+            }
         }
     }
 
     pub fn spawn(&mut self, instrs: Vec<Instruction>) {
-        let tx = &self.schedulers[0];
-        tx.send(Message::Spawn((instrs, self.registers.clone(), tx.clone())))
-            .unwrap();
+        let proc = Arc::new(Mutex::new(Process::new(
+            PID::new(0, self.procs.len()),
+            instrs,
+            self.registers.clone(),
+            self.tx.clone(),
+        )));
+        self.procs.push(proc.clone());
+        self.schedulers[0].send(SchedCmd::Spawn(proc)).unwrap();
     }
 
     pub fn wait(&self) {
         for tx in &self.schedulers {
             // Current behavior is for thread to stop after finishing remaining tasks
-            tx.send(Message::Kill).unwrap();
+            tx.send(SchedCmd::Kill).unwrap();
         }
-    }
-}
-
-impl Default for VM {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -62,23 +102,19 @@ pub struct Process {
     stack: Stack,
     registers: Registers,
     // heap: Heap,
-    // message_area: (),
+    message_area: Mailbox,
     pcb: PCB,
     // TODO: this is weird and also doesn't account for the fact that it may be moved to a
     // different thread
-    tx: Sender<Message>,
+    tx: Sender<VMCmd>,
 }
 
 impl Process {
-    pub fn new(
-        id: PID,
-        instrs: Vec<Instruction>,
-        registers: Registers,
-        tx: Sender<Message>,
-    ) -> Self {
+    pub fn new(id: PID, instrs: Vec<Instruction>, registers: Registers, tx: Sender<VMCmd>) -> Self {
         Self {
             stack: Stack::new_from(instrs),
             registers,
+            message_area: Mailbox::new(),
             pcb: PCB::new(id),
             // heap: Vec::new(),
             // message_area: (),
@@ -195,14 +231,12 @@ impl Process {
                 }
                 Instruction::Jmp { lbl } => self.pcb.set_ip(lbl),
                 Instruction::Spawn { instrs } => {
-                    self.tx
-                        .send(Message::Spawn((
-                            instrs,
-                            self.registers.clone(),
-                            self.tx.clone(),
-                        )))
-                        .unwrap();
+                    self.tx.send(VMCmd::Spawn(instrs)).unwrap();
                 }
+                Instruction::Send { pid, data } => self
+                    .tx
+                    .send(VMCmd::SendToProc(pid.expect_pid().clone(), data))
+                    .unwrap(),
             }
         }
         true
@@ -214,6 +248,11 @@ impl Process {
 
     pub fn pcb_mut(&mut self) -> &mut PCB {
         &mut self.pcb
+    }
+
+    pub fn write_to_mailbox(&mut self, message: DataObject) {
+        self.message_area.add_msg(message);
+        println!("messages: {:?}", self.message_area);
     }
 }
 

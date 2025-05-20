@@ -21,4 +21,6 @@ pub enum Instruction {
 
     // TODO: is this how we do this
     Spawn { instrs: Vec<Instruction> },
+
+    Send { pid: DataObject, data: DataObject },
 }

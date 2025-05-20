@@ -41,6 +41,14 @@ impl DataObject {
             panic!("expected int, got {self:?}");
         }
     }
+
+    pub fn expect_pid(&self) -> &PID {
+        if let DataObject::Pid(pid) = self {
+            pid
+        } else {
+            panic!("expected int, got {self:?}");
+        }
+    }
 }
 
 // TODO: this is probably bad
