@@ -12,7 +12,7 @@ pub enum DataObject {
     Small(u32),
     Big,
     Float,
-    Atom,
+    Atom(String),
     Refer,
     Port,
     Pid(PID),
